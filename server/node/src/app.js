@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import { initDb } from './db.js';
 import authRoutes from './routes/auth.js';
 import produceRoutes from './routes/produce.js';
 import pricesRoutes from './routes/prices.js';
@@ -35,6 +36,20 @@ app.use(
   })
 );
 app.use(express.json());
+
+let dbInitialized = false;
+app.use(async (req, res, next) => {
+  if (!dbInitialized) {
+    try {
+      await initDb();
+      dbInitialized = true;
+    } catch (err) {
+      console.error('Failed to initialize database:', err);
+      return res.status(500).json({ success: false, message: 'Database initialization failed' });
+    }
+  }
+  next();
+});
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true, backend: 'node' });

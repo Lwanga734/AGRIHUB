@@ -9,15 +9,16 @@ export function publicUser(row) {
   };
 }
 
-export function notify(db, userId, type, title, message, link = null) {
-  db.prepare(
-    'INSERT INTO notifications (user_id, type, title, message, link) VALUES (?, ?, ?, ?, ?)'
-  ).run(userId, type, title, message, link);
+export async function notify(db, userId, type, title, message, link = null) {
+  await db.execute({
+    sql: 'INSERT INTO notifications (user_id, type, title, message, link) VALUES (?, ?, ?, ?, ?)',
+    args: [userId, type, title, message, link]
+  });
 }
 
-export function notifyAdmins(db, type, title, message, link = null) {
-  const admins = db.prepare("SELECT id FROM users WHERE role IN ('admin','official')").all();
-  for (const { id } of admins) {
-    notify(db, id, type, title, message, link);
+export async function notifyAdmins(db, type, title, message, link = null) {
+  const result = await db.execute("SELECT id FROM users WHERE role IN ('admin','official')");
+  for (const row of result.rows) {
+    await notify(db, row.id, type, title, message, link);
   }
 }
