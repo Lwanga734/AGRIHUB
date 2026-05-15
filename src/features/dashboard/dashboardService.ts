@@ -1,14 +1,4 @@
-import axios from 'axios';
-
-const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost/agrihub';
-
-const api = axios.create({ baseURL: API_BASE });
-
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('agrihub_token');
-  if (token) config.headers.Authorization = `Bearer ${token}`;
-  return config;
-});
+import { api } from '../../lib/api';
 
 export interface DashboardStats {
   produce_today: number;
@@ -46,7 +36,7 @@ export interface DashboardData {
 
 export const dashboardService = {
   async getStats(): Promise<DashboardData> {
-    const { data } = await api.get('/dashboard/stats.php');
+    const { data } = await api.get<DashboardData>('/dashboard/stats.php');
     return data;
   },
 };

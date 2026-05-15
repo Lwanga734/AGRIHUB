@@ -1,14 +1,5 @@
-import axios from 'axios';
+import { api } from '../../lib/api';
 import type { Notification } from './notifications.types';
-
-const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost/agrihub';
-
-const api = axios.create({ baseURL: API_BASE });
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('agrihub_token');
-  if (token) config.headers.Authorization = `Bearer ${token}`;
-  return config;
-});
 
 export const notificationsService = {
   async getAll(): Promise<{ notifications: Notification[]; unread_count: number }> {

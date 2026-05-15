@@ -4,16 +4,7 @@ import { useAppDispatch } from '../store/hooks';
 import type { RootState } from '../store/store';
 import { useAuth } from '../features/auth/useAuth';
 import { restoreSession } from '../features/auth/authSlice';
-import axios from 'axios';
-
-const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost/agrihub';
-
-const api = axios.create({ baseURL: API_BASE });
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('agrihub_token');
-  if (token) config.headers.Authorization = `Bearer ${token}`;
-  return config;
-});
+import { api } from '../lib/api';
 
 const ROLE_STYLES: Record<string, string> = {
   farmer:   'bg-green-100 text-green-700',

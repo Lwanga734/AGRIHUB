@@ -1,0 +1,3 @@
+server/node/data/*.db
+server/node/data/*.db-*
+server/agrihub/config/database.php
