@@ -4,95 +4,175 @@ import { requireAuth } from '../middleware/auth.js';
 
 const router = Router();
 
+// Helper: today's date string in ISO format (YYYY-MM-DD)
+function todayStr() {
+  return new Date().toISOString().slice(0, 10);
+}
+function yesterdayStr() {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+function pctChange(todayVal, yesterdayVal) {
+  if (!yesterdayVal) return todayVal ? 100 : null;
+  return Math.round(((todayVal - yesterdayVal) / yesterdayVal) * 100);
+}
+
 router.get('/dashboard/stats.php', requireAuth, async (req, res, next) => {
   try {
-    const today = "date('now')";
-    const yesterday = "date('now', '-1 day')";
+    const today = todayStr();
+    const yesterday = yesterdayStr();
 
-    const { rows: produceTodayRows } = await db.execute(`SELECT COUNT(*) AS c, COALESCE(SUM(quantity_kg), 0) AS vol FROM produce WHERE date(created_at) = ${today}`);
-    const produceToday = produceTodayRows[0];
-    
-    const { rows: produceYesterdayRows } = await db.execute(`SELECT COUNT(*) AS c FROM produce WHERE date(created_at) = ${yesterday}`);
-    const produceYesterday = produceYesterdayRows[0];
+    // ── Produce counts ──────────────────────────────────────────
+    const { data: produceTodayRows } = await db
+      .from('produce')
+      .select('quantity_kg')
+      .gte('created_at', `${today}T00:00:00`)
+      .lt('created_at', `${today}T23:59:59.999`);
 
-    const { rows: avgPriceTodayRows } = await db.execute(`SELECT COALESCE(AVG(price_ugx), 0) AS avg FROM prices WHERE date(created_at) = ${today}`);
-    const avgPriceToday = avgPriceTodayRows[0];
-    
-    const { rows: avgPriceYesterdayRows } = await db.execute(`SELECT COALESCE(AVG(price_ugx), 0) AS avg FROM prices WHERE date(created_at) = ${yesterday}`);
-    const avgPriceYesterday = avgPriceYesterdayRows[0];
+    const { data: produceYesterdayRows } = await db
+      .from('produce')
+      .select('id')
+      .gte('created_at', `${yesterday}T00:00:00`)
+      .lt('created_at', `${yesterday}T23:59:59.999`);
 
-    const { rows: txTodayRows } = await db.execute(`SELECT COUNT(*) AS c, COALESCE(SUM(amount_ugx), 0) AS val FROM transactions WHERE date(created_at) = ${today}`);
-    const txToday = txTodayRows[0];
-    
-    const { rows: txYesterdayRows } = await db.execute(`SELECT COUNT(*) AS c FROM transactions WHERE date(created_at) = ${yesterday}`);
-    const txYesterday = txYesterdayRows[0];
+    const produceTodayCount = produceTodayRows?.length ?? 0;
+    const produceVolumeToday = produceTodayRows?.reduce((s, r) => s + (r.quantity_kg ?? 0), 0) ?? 0;
+    const produceYesterdayCount = produceYesterdayRows?.length ?? 0;
 
-    const { rows: tradersTodayRows } = await db.execute(`SELECT COUNT(DISTINCT buyer_id) AS c FROM transactions WHERE date(created_at) = ${today}`);
-    const tradersToday = tradersTodayRows[0];
-    
-    const { rows: tradersYesterdayRows } = await db.execute(`SELECT COUNT(DISTINCT buyer_id) AS c FROM transactions WHERE date(created_at) = ${yesterday}`);
-    const tradersYesterday = tradersYesterdayRows[0];
+    // ── Average prices ──────────────────────────────────────────
+    const { data: pricesTodayRows } = await db
+      .from('prices')
+      .select('price_ugx')
+      .gte('created_at', `${today}T00:00:00`)
+      .lt('created_at', `${today}T23:59:59.999`);
 
-    const pctChange = (todayVal, yesterdayVal) => {
-      if (!yesterdayVal) return todayVal ? 100 : null;
-      return Math.round(((todayVal - yesterdayVal) / yesterdayVal) * 100);
-    };
+    const { data: pricesYesterdayRows } = await db
+      .from('prices')
+      .select('price_ugx')
+      .gte('created_at', `${yesterday}T00:00:00`)
+      .lt('created_at', `${yesterday}T23:59:59.999`);
 
-    const { rows: activity } = await db.execute(`
-      SELECT * FROM (
-         SELECT 'produce' AS type,
-                p.commodity || ' registered' AS detail,
-                p.quantity_kg,
-                NULL AS amount,
-                p.created_at,
-                u.name AS actor
-         FROM produce p JOIN users u ON u.id = p.farmer_id
-         UNION ALL
-         SELECT 'price',
-                pr.commodity || ' @ UGX ' || pr.price_ugx,
-                NULL,
-                pr.price_ugx,
-                pr.created_at,
-                u.name
-         FROM prices pr JOIN users u ON u.id = pr.logged_by
-         UNION ALL
-         SELECT 'transaction',
-                p.commodity || ' transaction',
-                t.quantity_kg,
-                t.amount_ugx,
-                t.created_at,
-                u.name
-         FROM transactions t
-         JOIN produce p ON p.id = t.produce_id
-         JOIN users u ON u.id = t.recorded_by
-       ) AS feed
-       ORDER BY feed.created_at DESC
-       LIMIT 15
-    `);
+    const avgToday = pricesTodayRows?.length
+      ? pricesTodayRows.reduce((s, r) => s + (r.price_ugx ?? 0), 0) / pricesTodayRows.length
+      : 0;
+    const avgYesterday = pricesYesterdayRows?.length
+      ? pricesYesterdayRows.reduce((s, r) => s + (r.price_ugx ?? 0), 0) / pricesYesterdayRows.length
+      : 0;
 
-    const { rows: commodity_prices } = await db.execute(`
-      SELECT commodity, price_ugx, unit
-       FROM prices p1
-       WHERE created_at = (
-         SELECT MAX(created_at) FROM prices p2 WHERE p2.commodity = p1.commodity
-       )
-       ORDER BY commodity
-    `);
+    // ── Transactions ────────────────────────────────────────────
+    const { data: txTodayRows } = await db
+      .from('transactions')
+      .select('amount_ugx, buyer_id')
+      .gte('created_at', `${today}T00:00:00`)
+      .lt('created_at', `${today}T23:59:59.999`);
+
+    const { data: txYesterdayRows } = await db
+      .from('transactions')
+      .select('id')
+      .gte('created_at', `${yesterday}T00:00:00`)
+      .lt('created_at', `${yesterday}T23:59:59.999`);
+
+    const txTodayCount = txTodayRows?.length ?? 0;
+    const txValueToday = txTodayRows?.reduce((s, r) => s + (r.amount_ugx ?? 0), 0) ?? 0;
+    const txYesterdayCount = txYesterdayRows?.length ?? 0;
+
+    const activeTradersToday = new Set(txTodayRows?.map((r) => r.buyer_id) ?? []).size;
+    const activeTradersYesterday = new Set(
+      (
+        await db
+          .from('transactions')
+          .select('buyer_id')
+          .gte('created_at', `${yesterday}T00:00:00`)
+          .lt('created_at', `${yesterday}T23:59:59.999`)
+      ).data?.map((r) => r.buyer_id) ?? []
+    ).size;
+
+    // ── Activity feed (last 15 events) ──────────────────────────
+    const [
+      { data: recentProduce },
+      { data: recentPrices },
+      { data: recentTx },
+    ] = await Promise.all([
+      db
+        .from('produce')
+        .select('commodity, quantity_kg, created_at, users!produce_farmer_id_fkey(name)')
+        .order('created_at', { ascending: false })
+        .limit(15),
+      db
+        .from('prices')
+        .select('commodity, price_ugx, created_at, users!prices_logged_by_fkey(name)')
+        .order('created_at', { ascending: false })
+        .limit(15),
+      db
+        .from('transactions')
+        .select(
+          'quantity_kg, amount_ugx, created_at, produce!transactions_produce_id_fkey(commodity), recorder:users!transactions_recorded_by_fkey(name)'
+        )
+        .order('created_at', { ascending: false })
+        .limit(15),
+    ]);
+
+    const activityFeed = [
+      ...(recentProduce ?? []).map(({ users, ...p }) => ({
+        type: 'produce',
+        detail: `${p.commodity} registered`,
+        quantity_kg: p.quantity_kg,
+        amount: null,
+        created_at: p.created_at,
+        actor: users?.name ?? null,
+      })),
+      ...(recentPrices ?? []).map(({ users, ...p }) => ({
+        type: 'price',
+        detail: `${p.commodity} @ UGX ${p.price_ugx}`,
+        quantity_kg: null,
+        amount: p.price_ugx,
+        created_at: p.created_at,
+        actor: users?.name ?? null,
+      })),
+      ...(recentTx ?? []).map(({ produce: prod, recorder, ...t }) => ({
+        type: 'transaction',
+        detail: `${prod?.commodity ?? 'Unknown'} transaction`,
+        quantity_kg: t.quantity_kg,
+        amount: t.amount_ugx,
+        created_at: t.created_at,
+        actor: recorder?.name ?? null,
+      })),
+    ]
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+      .slice(0, 15);
+
+    // ── Latest price per commodity ──────────────────────────────
+    const { data: allPrices } = await db
+      .from('prices')
+      .select('commodity, price_ugx, unit, created_at')
+      .order('created_at', { ascending: false });
+
+    const latestByComodity = new Map();
+    for (const p of allPrices ?? []) {
+      if (!latestByComodity.has(p.commodity)) {
+        latestByComodity.set(p.commodity, p);
+      }
+    }
+    const commodity_prices = [...latestByComodity.values()].sort((a, b) =>
+      a.commodity.localeCompare(b.commodity)
+    );
 
     res.json({
       stats: {
-        produce_today: produceToday.c,
-        produce_volume_today: produceToday.vol,
-        produce_change: pctChange(produceToday.c, produceYesterday.c),
-        avg_price_today: Math.round(avgPriceToday.avg),
-        avg_price_change: pctChange(avgPriceToday.avg, avgPriceYesterday.avg),
-        transactions_today: txToday.c,
-        transactions_value: txToday.val,
-        transactions_change: pctChange(txToday.c, txYesterday.c),
-        active_traders: tradersToday.c,
-        traders_change: pctChange(tradersToday.c, tradersYesterday.c),
+        produce_today: produceTodayCount,
+        produce_volume_today: produceVolumeToday,
+        produce_change: pctChange(produceTodayCount, produceYesterdayCount),
+        avg_price_today: Math.round(avgToday),
+        avg_price_change: pctChange(avgToday, avgYesterday),
+        transactions_today: txTodayCount,
+        transactions_value: txValueToday,
+        transactions_change: pctChange(txTodayCount, txYesterdayCount),
+        active_traders: activeTradersToday,
+        traders_change: pctChange(activeTradersToday, activeTradersYesterday),
       },
-      activity,
+      activity: activityFeed,
       commodity_prices,
     });
   } catch (err) {

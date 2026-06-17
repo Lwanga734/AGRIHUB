@@ -7,19 +7,28 @@ const router = Router();
 
 router.get('/transactions/index.php', requireAuth, async (req, res, next) => {
   try {
-    const { rows: transactions } = await db.execute(`
-      SELECT t.*, p.commodity,
-              buyer.name AS buyer_name,
-              seller.name AS seller_name,
-              rec.name AS recorded_by_name
-       FROM transactions t
-       LEFT JOIN produce p ON p.id = t.produce_id
-       LEFT JOIN users buyer ON buyer.id = t.buyer_id
-       LEFT JOIN users seller ON seller.id = t.seller_id
-       LEFT JOIN users rec ON rec.id = t.recorded_by
-       ORDER BY t.created_at DESC
-    `);
-    res.json({ success: true, transactions });
+    const { data: transactions, error } = await db
+      .from('transactions')
+      .select(`
+        *,
+        produce!transactions_produce_id_fkey(commodity),
+        buyer:users!transactions_buyer_id_fkey(name),
+        seller:users!transactions_seller_id_fkey(name),
+        recorder:users!transactions_recorded_by_fkey(name)
+      `)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    const result = (transactions ?? []).map(({ produce, buyer, seller, recorder, ...t }) => ({
+      ...t,
+      commodity: produce?.commodity ?? null,
+      buyer_name: buyer?.name ?? null,
+      seller_name: seller?.name ?? null,
+      recorded_by_name: recorder?.name ?? null,
+    }));
+
+    res.json({ success: true, transactions: result });
   } catch (err) {
     next(err);
   }
@@ -36,11 +45,13 @@ router.post('/transactions/create.php', requireAuth, async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Produce, amount and quantity are required' });
     }
 
-    const { rows: produceRows } = await db.execute({
-      sql: 'SELECT * FROM produce WHERE id = ? AND status = ?',
-      args: [produce_id, 'verified']
-    });
-    const produce = produceRows[0];
+    // Verify produce exists and is verified
+    const { data: produce } = await db
+      .from('produce')
+      .select('*')
+      .eq('id', produce_id)
+      .eq('status', 'verified')
+      .maybeSingle();
 
     if (!produce) {
       return res.status(404).json({ success: false, message: 'Produce not found or not yet verified' });
@@ -49,32 +60,24 @@ router.post('/transactions/create.php', requireAuth, async (req, res, next) => {
     const seller_id = produce.farmer_id;
     const recorded_by = req.user.sub;
 
-    const result = await db.execute({
-      sql: `INSERT INTO transactions (produce_id, buyer_id, seller_id, amount_ugx, quantity_kg, recorded_by)
-            VALUES (?, ?, ?, ?, ?, ?)`,
-      args: [produce_id, buyer_id, seller_id, amount_ugx, quantity_kg, recorded_by]
-    });
+    const { data: newTx, error: txError } = await db
+      .from('transactions')
+      .insert({ produce_id, buyer_id, seller_id, amount_ugx, quantity_kg, recorded_by })
+      .select(`
+        *,
+        produce!transactions_produce_id_fkey(commodity),
+        buyer:users!transactions_buyer_id_fkey(name),
+        seller:users!transactions_seller_id_fkey(name),
+        recorder:users!transactions_recorded_by_fkey(name)
+      `)
+      .single();
 
-    await db.execute({
-      sql: 'UPDATE produce SET status = ? WHERE id = ?',
-      args: ['sold', produce_id]
-    });
+    if (txError) throw txError;
 
-    const { rows: transactionRows } = await db.execute({
-      sql: `SELECT t.*, p.commodity,
-                  buyer.name AS buyer_name,
-                  seller.name AS seller_name,
-                  rec.name AS recorded_by_name
-           FROM transactions t
-           LEFT JOIN produce p ON p.id = t.produce_id
-           LEFT JOIN users buyer ON buyer.id = t.buyer_id
-           LEFT JOIN users seller ON seller.id = t.seller_id
-           LEFT JOIN users rec ON rec.id = t.recorded_by
-           WHERE t.id = ?`,
-      args: [Number(result.lastInsertRowid)]
-    });
-    const transaction = transactionRows[0];
+    // Mark produce as sold
+    await db.from('produce').update({ status: 'sold' }).eq('id', produce_id);
 
+    // Notify the seller
     await notify(
       db,
       seller_id,
@@ -83,6 +86,15 @@ router.post('/transactions/create.php', requireAuth, async (req, res, next) => {
       `${produce.commodity} sold for UGX ${amount_ugx}`,
       '/transactions'
     );
+
+    const { produce: prod, buyer, seller, recorder, ...t } = newTx;
+    const transaction = {
+      ...t,
+      commodity: prod?.commodity ?? null,
+      buyer_name: buyer?.name ?? null,
+      seller_name: seller?.name ?? null,
+      recorded_by_name: recorder?.name ?? null,
+    };
 
     res.status(201).json({ success: true, transaction });
   } catch (err) {

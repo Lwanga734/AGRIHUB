@@ -1,104 +1,42 @@
-import { createClient } from '@libsql/client';
+import { createClient } from '@supabase/supabase-js';
 import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';
 
 dotenv.config({ path: '../../.env' });
 
-const url = process.env.TURSO_DATABASE_URL || 'file:./data/agrihub.db';
-const authToken = process.env.TURSO_AUTH_TOKEN;
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const db = createClient({
-  url,
-  authToken,
+if (!supabaseUrl || !supabaseKey) {
+  throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables are required');
+}
+
+// Use the service-role key so the API can bypass RLS for server-side operations
+const supabase = createClient(supabaseUrl, supabaseKey, {
+  auth: { persistSession: false },
 });
 
+/**
+ * Seed the default admin account if it doesn't exist.
+ * Table creation is handled by Supabase — run database/supabase_schema.sql
+ * once in the Supabase SQL Editor before starting the server.
+ */
 export const initDb = async () => {
-  await db.executeMultiple(`
-    CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      email TEXT NOT NULL UNIQUE,
-      password TEXT NOT NULL,
-      role TEXT NOT NULL DEFAULT 'farmer' CHECK(role IN ('farmer','trader','official','admin')),
-      phone TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
-    );
+  const { data: existing } = await supabase
+    .from('users')
+    .select('id')
+    .eq('email', 'admin@agrihub.ug')
+    .maybeSingle();
 
-    CREATE TABLE IF NOT EXISTS produce (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      farmer_id INTEGER NOT NULL,
-      commodity TEXT NOT NULL,
-      quantity_kg REAL NOT NULL,
-      source_location TEXT,
-      quality_grade TEXT DEFAULT 'ungraded' CHECK(quality_grade IN ('A','B','C','ungraded')),
-      status TEXT DEFAULT 'pending' CHECK(status IN ('pending','verified','sold')),
-      notes TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (farmer_id) REFERENCES users(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS prices (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      commodity TEXT NOT NULL,
-      price_ugx REAL NOT NULL,
-      unit TEXT DEFAULT 'kg',
-      logged_by INTEGER NOT NULL,
-      created_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (logged_by) REFERENCES users(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS transactions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      produce_id INTEGER NOT NULL,
-      buyer_id INTEGER NOT NULL,
-      seller_id INTEGER NOT NULL,
-      amount_ugx REAL NOT NULL,
-      quantity_kg REAL NOT NULL,
-      recorded_by INTEGER NOT NULL,
-      created_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (produce_id) REFERENCES produce(id) ON DELETE CASCADE,
-      FOREIGN KEY (buyer_id) REFERENCES users(id) ON DELETE CASCADE,
-      FOREIGN KEY (seller_id) REFERENCES users(id) ON DELETE CASCADE,
-      FOREIGN KEY (recorded_by) REFERENCES users(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS quality_checks (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      produce_id INTEGER NOT NULL,
-      official_id INTEGER NOT NULL,
-      grade TEXT NOT NULL CHECK(grade IN ('A','B','C')),
-      notes TEXT,
-      checked_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (produce_id) REFERENCES produce(id) ON DELETE CASCADE,
-      FOREIGN KEY (official_id) REFERENCES users(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS notifications (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      type TEXT NOT NULL,
-      title TEXT NOT NULL,
-      message TEXT NOT NULL,
-      is_read INTEGER DEFAULT 0,
-      link TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-    );
-  `);
-
-  const adminResult = await db.execute({
-    sql: 'SELECT id FROM users WHERE email = ?',
-    args: ['admin@agrihub.ug']
-  });
-
-  if (adminResult.rows.length === 0) {
+  if (!existing) {
     const hash = bcrypt.hashSync('admin123', 10);
-    await db.execute({
-      sql: 'INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)',
-      args: ['AgriHub Admin', 'admin@agrihub.ug', hash, 'admin']
+    await supabase.from('users').insert({
+      name: 'AgriHub Admin',
+      email: 'admin@agrihub.ug',
+      password: hash,
+      role: 'admin',
     });
   }
 };
 
-export default db;
+export default supabase;

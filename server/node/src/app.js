@@ -37,22 +37,11 @@ app.use(
 );
 app.use(express.json());
 
-let dbInitialized = false;
-app.use(async (req, res, next) => {
-  if (!dbInitialized) {
-    try {
-      await initDb();
-      dbInitialized = true;
-    } catch (err) {
-      console.error('Failed to initialize database:', err);
-      return res.status(500).json({ success: false, message: 'Database initialization failed' });
-    }
-  }
-  next();
-});
+// Seed admin user on startup (non-blocking — failures are logged, not fatal)
+initDb().catch((err) => console.error('initDb warning:', err.message));
 
 app.get('/health', (_req, res) => {
-  res.json({ ok: true, backend: 'node' });
+  res.json({ ok: true, backend: 'node', database: 'supabase' });
 });
 
 app.use(authRoutes);

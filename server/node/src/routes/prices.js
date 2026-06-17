@@ -1,19 +1,24 @@
 import { Router } from 'express';
 import db from '../db.js';
 import { requireAuth, requireRoles } from '../middleware/auth.js';
-import { notifyAdmins } from '../helpers.js';
 
 const router = Router();
 
 router.get('/prices/index.php', requireAuth, async (req, res, next) => {
   try {
-    const { rows: prices } = await db.execute(`
-      SELECT p.*, u.name AS logged_by_name
-      FROM prices p
-      LEFT JOIN users u ON u.id = p.logged_by
-      ORDER BY p.created_at DESC
-    `);
-    res.json({ success: true, prices });
+    const { data: prices, error } = await db
+      .from('prices')
+      .select('*, users!prices_logged_by_fkey(name)')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    const result = (prices ?? []).map(({ users, ...p }) => ({
+      ...p,
+      logged_by_name: users?.name ?? null,
+    }));
+
+    res.json({ success: true, prices: result });
   } catch (err) {
     next(err);
   }
@@ -29,24 +34,32 @@ router.post('/prices/create.php', requireAuth, requireRoles('official', 'admin')
       return res.status(400).json({ success: false, message: 'Commodity and price are required' });
     }
 
-    const result = await db.execute({
-      sql: 'INSERT INTO prices (commodity, price_ugx, unit, logged_by) VALUES (?, ?, ?, ?)',
-      args: [commodity, price_ugx, unit, req.user.sub]
-    });
+    const { data: newPrice, error } = await db
+      .from('prices')
+      .insert({ commodity, price_ugx, unit, logged_by: req.user.sub })
+      .select('*, users!prices_logged_by_fkey(name)')
+      .single();
 
-    const { rows: priceRows } = await db.execute({
-      sql: `SELECT p.*, u.name AS logged_by_name FROM prices p
-            LEFT JOIN users u ON u.id = p.logged_by WHERE p.id = ?`,
-      args: [Number(result.lastInsertRowid)]
-    });
-    const price = priceRows[0];
+    if (error) throw error;
 
-    const { rows: traders } = await db.execute("SELECT id FROM users WHERE role = 'trader'");
-    for (const { id } of traders) {
-      await db.execute({
-        sql: 'INSERT INTO notifications (user_id, type, title, message, link) VALUES (?, ?, ?, ?, ?)',
-        args: [id, 'price', 'Price update', `${commodity}: UGX ${price_ugx}/${unit}`, '/prices']
-      });
+    const { users, ...p } = newPrice;
+    const price = { ...p, logged_by_name: users?.name ?? null };
+
+    // Notify all traders about the new price
+    const { data: traders } = await db
+      .from('users')
+      .select('id')
+      .eq('role', 'trader');
+
+    if (traders && traders.length > 0) {
+      const notifications = traders.map(({ id }) => ({
+        user_id: id,
+        type: 'price',
+        title: 'Price update',
+        message: `${commodity}: UGX ${price_ugx}/${unit}`,
+        link: '/prices',
+      }));
+      await db.from('notifications').insert(notifications);
     }
 
     res.status(201).json({ success: true, price });
@@ -61,10 +74,10 @@ router.post('/prices/delete.php', requireAuth, requireRoles('official', 'admin')
     if (!id) {
       return res.status(400).json({ success: false, message: 'Price ID is required' });
     }
-    await db.execute({
-      sql: 'DELETE FROM prices WHERE id = ?',
-      args: [id]
-    });
+
+    const { error } = await db.from('prices').delete().eq('id', id);
+    if (error) throw error;
+
     res.json({ success: true, message: 'Price removed' });
   } catch (err) {
     next(err);

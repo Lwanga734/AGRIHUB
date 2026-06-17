@@ -29,27 +29,28 @@ router.post('/auth/register.php', async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Invalid role' });
     }
 
-    const { rows: existingRows } = await db.execute({
-      sql: 'SELECT id FROM users WHERE email = ?',
-      args: [email]
-    });
-    if (existingRows.length > 0) {
+    // Check for existing email
+    const { data: existing } = await db
+      .from('users')
+      .select('id')
+      .eq('email', email)
+      .maybeSingle();
+
+    if (existing) {
       return res.status(409).json({ success: false, message: 'An account with this email already exists' });
     }
 
     const hash = bcrypt.hashSync(password, 10);
-    const result = await db.execute({
-      sql: 'INSERT INTO users (name, email, password, role, phone) VALUES (?, ?, ?, ?, ?)',
-      args: [name, email, hash, role, phone || null]
-    });
+    const { data: newUser, error } = await db
+      .from('users')
+      .insert({ name, email, password: hash, role, phone: phone || null })
+      .select('id, name, email, role, phone')
+      .single();
 
-    const { rows: userRows } = await db.execute({
-      sql: 'SELECT id, name, email, role, phone FROM users WHERE id = ?',
-      args: [Number(result.lastInsertRowid)]
-    });
-    const user = publicUser(userRows[0]);
+    if (error) throw error;
+
+    const user = publicUser(newUser);
     const token = generateToken(user.id, user.email, user.role);
-
     res.status(201).json({ success: true, token, user });
   } catch (err) {
     next(err);
@@ -65,11 +66,11 @@ router.post('/auth/login.php', async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Email and password are required' });
     }
 
-    const { rows: userRows } = await db.execute({
-      sql: 'SELECT * FROM users WHERE email = ?',
-      args: [email]
-    });
-    const row = userRows[0];
+    const { data: row } = await db
+      .from('users')
+      .select('*')
+      .eq('email', email)
+      .maybeSingle();
 
     if (!row || !bcrypt.compareSync(password, row.password)) {
       return res.status(401).json({ success: false, message: 'Invalid email or password' });
@@ -85,11 +86,11 @@ router.post('/auth/login.php', async (req, res, next) => {
 
 router.get('/auth/me.php', requireAuth, async (req, res, next) => {
   try {
-    const { rows: userRows } = await db.execute({
-      sql: 'SELECT id, name, email, role, phone FROM users WHERE id = ?',
-      args: [req.user.sub]
-    });
-    const row = userRows[0];
+    const { data: row } = await db
+      .from('users')
+      .select('id, name, email, role, phone')
+      .eq('id', req.user.sub)
+      .maybeSingle();
 
     if (!row) {
       return res.status(404).json({ success: false, message: 'User not found' });

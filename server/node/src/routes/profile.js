@@ -8,47 +8,35 @@ const router = Router();
 router.get('/profile/stats.php', requireAuth, async (req, res, next) => {
   try {
     const id = req.user.sub;
-    
-    const { rows: userRows } = await db.execute({
-      sql: 'SELECT created_at FROM users WHERE id = ?',
-      args: [id]
-    });
-    const user = userRows[0];
 
-    const { rows: produceRows } = await db.execute({
-      sql: 'SELECT COUNT(*) AS c, COALESCE(SUM(quantity_kg), 0) AS vol FROM produce WHERE farmer_id = ?',
-      args: [id]
-    });
-    const produce = produceRows[0];
+    const [
+      { data: user },
+      { data: produceRows },
+      { data: purchasesRows },
+      { data: salesRows },
+      { data: pricesRows },
+    ] = await Promise.all([
+      db.from('users').select('created_at').eq('id', id).maybeSingle(),
+      db.from('produce').select('quantity_kg').eq('farmer_id', id),
+      db.from('transactions').select('amount_ugx').eq('buyer_id', id),
+      db.from('transactions').select('amount_ugx').eq('seller_id', id),
+      db.from('prices').select('id').eq('logged_by', id),
+    ]);
 
-    const { rows: purchasesRows } = await db.execute({
-      sql: 'SELECT COUNT(*) AS c, COALESCE(SUM(amount_ugx), 0) AS val FROM transactions WHERE buyer_id = ?',
-      args: [id]
-    });
-    const purchases = purchasesRows[0];
-
-    const { rows: salesRows } = await db.execute({
-      sql: 'SELECT COUNT(*) AS c, COALESCE(SUM(amount_ugx), 0) AS val FROM transactions WHERE seller_id = ?',
-      args: [id]
-    });
-    const sales = salesRows[0];
-
-    const { rows: pricesRows } = await db.execute({
-      sql: 'SELECT COUNT(*) AS c FROM prices WHERE logged_by = ?',
-      args: [id]
-    });
-    const prices = pricesRows[0];
+    const produce_volume = produceRows?.reduce((s, r) => s + (r.quantity_kg ?? 0), 0) ?? 0;
+    const purchase_value = purchasesRows?.reduce((s, r) => s + (r.amount_ugx ?? 0), 0) ?? 0;
+    const sales_value = salesRows?.reduce((s, r) => s + (r.amount_ugx ?? 0), 0) ?? 0;
 
     res.json({
       success: true,
       stats: {
-        produce_registered: produce.c,
-        produce_volume: produce.vol,
-        purchases: purchases.c,
-        purchase_value: purchases.val,
-        sales: sales.c,
-        sales_value: sales.val,
-        prices_logged: prices.c,
+        produce_registered: produceRows?.length ?? 0,
+        produce_volume,
+        purchases: purchasesRows?.length ?? 0,
+        purchase_value,
+        sales: salesRows?.length ?? 0,
+        sales_value,
+        prices_logged: pricesRows?.length ?? 0,
         member_since: user?.created_at ?? null,
       },
     });
@@ -66,10 +54,12 @@ router.post('/profile/update.php', requireAuth, async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Name is required' });
     }
 
-    await db.execute({
-      sql: 'UPDATE users SET name = ?, phone = ?, updated_at = datetime(\'now\') WHERE id = ?',
-      args: [name, phone || null, req.user.sub]
-    });
+    const { error } = await db
+      .from('users')
+      .update({ name, phone: phone || null })
+      .eq('id', req.user.sub);
+
+    if (error) throw error;
 
     res.json({ success: true, message: 'Profile updated successfully' });
   } catch (err) {
@@ -89,21 +79,23 @@ router.post('/profile/change_password.php', requireAuth, async (req, res, next) 
       return res.status(400).json({ success: false, message: 'New password must be at least 6 characters' });
     }
 
-    const { rows: userRows } = await db.execute({
-      sql: 'SELECT password FROM users WHERE id = ?',
-      args: [req.user.sub]
-    });
-    const row = userRows[0];
+    const { data: row } = await db
+      .from('users')
+      .select('password')
+      .eq('id', req.user.sub)
+      .maybeSingle();
 
     if (!row || !bcrypt.compareSync(current, row.password)) {
       return res.status(401).json({ success: false, message: 'Current password is incorrect' });
     }
 
     const hash = bcrypt.hashSync(nextPassword, 10);
-    await db.execute({
-      sql: 'UPDATE users SET password = ?, updated_at = datetime(\'now\') WHERE id = ?',
-      args: [hash, req.user.sub]
-    });
+    const { error } = await db
+      .from('users')
+      .update({ password: hash })
+      .eq('id', req.user.sub);
+
+    if (error) throw error;
 
     res.json({ success: true, message: 'Password changed successfully' });
   } catch (err) {

@@ -9,16 +9,34 @@ export function publicUser(row) {
   };
 }
 
+/**
+ * Insert a single notification row.
+ * @param {import('@supabase/supabase-js').SupabaseClient} db
+ */
 export async function notify(db, userId, type, title, message, link = null) {
-  await db.execute({
-    sql: 'INSERT INTO notifications (user_id, type, title, message, link) VALUES (?, ?, ?, ?, ?)',
-    args: [userId, type, title, message, link]
+  await db.from('notifications').insert({
+    user_id: userId,
+    type,
+    title,
+    message,
+    link,
   });
 }
 
+/**
+ * Notify all admin and official users.
+ * @param {import('@supabase/supabase-js').SupabaseClient} db
+ */
 export async function notifyAdmins(db, type, title, message, link = null) {
-  const result = await db.execute("SELECT id FROM users WHERE role IN ('admin','official')");
-  for (const row of result.rows) {
-    await notify(db, row.id, type, title, message, link);
+  const { data: admins } = await db
+    .from('users')
+    .select('id')
+    .in('role', ['admin', 'official']);
+
+  if (!admins) return;
+
+  const rows = admins.map((u) => ({ user_id: u.id, type, title, message, link }));
+  if (rows.length > 0) {
+    await db.from('notifications').insert(rows);
   }
 }
