@@ -1,17 +1,30 @@
 import { createClient } from '@supabase/supabase-js';
 import bcrypt from 'bcryptjs';
 
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+// Lazy singleton — created on first call so env vars are definitely loaded
+let _supabase = null;
 
-// Create client — will be null if env vars missing (handled per-request)
-const supabase = supabaseUrl && supabaseKey
-  ? createClient(supabaseUrl, supabaseKey, { auth: { persistSession: false } })
-  : null;
+function getClient() {
+  if (_supabase) return _supabase;
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) {
+    throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required');
+  }
+  _supabase = createClient(url, key, { auth: { persistSession: false } });
+  return _supabase;
+}
+
+// Proxy — routes use `db.from(...)` just like before
+const supabase = new Proxy({}, {
+  get(_target, prop) {
+    return getClient()[prop];
+  },
+});
 
 export const initDb = async () => {
-  if (!supabase) return; // Skip seed if not configured
-  const { data: existing } = await supabase
+  const client = getClient();
+  const { data: existing } = await client
     .from('users')
     .select('id')
     .eq('email', 'admin@agrihub.ug')
@@ -19,7 +32,7 @@ export const initDb = async () => {
 
   if (!existing) {
     const hash = bcrypt.hashSync('admin123', 10);
-    await supabase.from('users').insert({
+    await client.from('users').insert({
       name: 'AgriHub Admin',
       email: 'admin@agrihub.ug',
       password: hash,
