@@ -1,6 +1,10 @@
 import express from 'express';
 import cors from 'cors';
+import dotenv from 'dotenv';
 import { initDb } from './db.js';
+
+// Load .env for local dev — Vercel injects env vars directly
+dotenv.config({ path: new URL('../../.env', import.meta.url).pathname });
 import authRoutes from './routes/auth.js';
 import produceRoutes from './routes/produce.js';
 import pricesRoutes from './routes/prices.js';

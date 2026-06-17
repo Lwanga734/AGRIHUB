@@ -2,7 +2,8 @@ import { createClient } from '@supabase/supabase-js';
 import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';
 
-dotenv.config({ path: '../../.env' });
+// Load .env for local dev — on Vercel, env vars are injected directly
+dotenv.config({ path: new URL('../../.env', import.meta.url).pathname });
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
