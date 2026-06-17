@@ -4,21 +4,13 @@ import bcrypt from 'bcryptjs';
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-if (!supabaseUrl || !supabaseKey) {
-  throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables are required');
-}
+// Create client — will be null if env vars missing (handled per-request)
+const supabase = supabaseUrl && supabaseKey
+  ? createClient(supabaseUrl, supabaseKey, { auth: { persistSession: false } })
+  : null;
 
-// Service-role key bypasses RLS for server-side operations
-const supabase = createClient(supabaseUrl, supabaseKey, {
-  auth: { persistSession: false },
-});
-
-/**
- * Seed the default admin account if it doesn't exist.
- * Tables must be created first — run database/supabase_schema.sql
- * once in the Supabase SQL Editor.
- */
 export const initDb = async () => {
+  if (!supabase) return; // Skip seed if not configured
   const { data: existing } = await supabase
     .from('users')
     .select('id')

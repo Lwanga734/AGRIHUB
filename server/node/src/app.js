@@ -11,39 +11,46 @@ import usersRoutes from './routes/users.js';
 import notificationsRoutes from './routes/notifications.js';
 import profileRoutes from './routes/profile.js';
 
-const allowedOrigins = [
-  'http://localhost:5173',
-  'https://agrihub-9dt3.vercel.app',
-  'https://agrihub-kohl.vercel.app',
-];
-
-function isAllowedOrigin(origin) {
-  if (!origin) return false;
-  if (allowedOrigins.includes(origin)) return true;
-  return /^https:\/\/[\w-]+\.vercel\.app$/i.test(origin);
-}
-
 const app = express();
 
-app.use(
-  cors({
-    origin(origin, callback) {
-      if (!origin || isAllowedOrigin(origin)) {
-        callback(null, true);
-      } else {
-        callback(null, false);
-      }
-    },
-    credentials: true,
-  })
-);
+app.use(cors({
+  origin(origin, callback) {
+    // Allow all vercel.app origins + localhost
+    if (!origin || /localhost/.test(origin) || /\.vercel\.app$/i.test(origin)) {
+      callback(null, true);
+    } else {
+      callback(null, false);
+    }
+  },
+  credentials: true,
+}));
+
 app.use(express.json());
 
-// Seed admin user on startup (non-blocking)
-initDb().catch((err) => console.error('initDb warning:', err.message));
-
+// Health check — shows env var status for debugging
 app.get('/health', (_req, res) => {
-  res.json({ ok: true, backend: 'node', database: 'supabase' });
+  res.json({
+    ok: true,
+    backend: 'node',
+    database: 'supabase',
+    env: {
+      SUPABASE_URL: process.env.SUPABASE_URL ? 'set' : 'MISSING',
+      SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY ? 'set' : 'MISSING',
+      JWT_SECRET: process.env.JWT_SECRET ? 'set' : 'MISSING',
+    },
+  });
+});
+
+// Middleware: guard all non-health routes if Supabase not configured
+app.use((req, res, next) => {
+  if (req.path === '/health') return next();
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return res.status(503).json({
+      success: false,
+      message: 'Server not configured: missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY',
+    });
+  }
+  next();
 });
 
 app.use(authRoutes);
@@ -66,5 +73,8 @@ app.use((err, _req, res, _next) => {
     message: process.env.NODE_ENV === 'production' ? 'Server error' : err.message,
   });
 });
+
+// Seed admin (non-blocking)
+initDb().catch((err) => console.error('initDb warning:', err.message));
 
 export default app;
