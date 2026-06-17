@@ -1,0 +1,1 @@
+Clean URLs: remove .php extensions from all API routes and frontend services

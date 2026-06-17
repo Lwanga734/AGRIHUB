@@ -3,15 +3,15 @@ import type { Notification } from './notifications.types';
 
 export const notificationsService = {
   async getAll(): Promise<{ notifications: Notification[]; unread_count: number }> {
-    const { data } = await api.get('/notifications/index.php?limit=30');
+    const { data } = await api.get('/notifications?limit=30');
     return data;
   },
 
   async markRead(id: number): Promise<void> {
-    await api.post('/notifications/mark_read.php', { id });
+    await api.post('/notifications/mark-read', { id });
   },
 
   async markAllRead(): Promise<void> {
-    await api.post('/notifications/mark_read.php', { id: 0 });
+    await api.post('/notifications/mark-read', { id: 0 });
   },
 };

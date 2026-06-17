@@ -3,12 +3,12 @@ import type { Transaction, TransactionFormData } from './transactions.types';
 
 export const transactionsService = {
   async getAll(): Promise<Transaction[]> {
-    const { data } = await api.get('/transactions/index.php');
+    const { data } = await api.get('/transactions');
     return data.transactions ?? [];
   },
 
   async create(payload: TransactionFormData): Promise<Transaction> {
-    const { data } = await api.post('/transactions/create.php', payload);
+    const { data } = await api.post('/transactions/create', payload);
     return data.transaction;
   },
 };

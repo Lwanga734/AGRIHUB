@@ -68,7 +68,7 @@ export default function ProfilePage() {
 
   // Fetch activity stats
   useEffect(() => {
-    api.get('/profile/stats.php')
+    api.get('/profile/stats')
       .then((res) => { if (res.data.success) setStats(res.data.stats); })
       .catch(() => {})
       .finally(() => setStatsLoading(false));
@@ -80,7 +80,7 @@ export default function ProfilePage() {
     setProfileError('');
     setProfileSuccess('');
     try {
-      const res = await api.post('/profile/update.php', profileForm);
+      const res = await api.post('/profile/update', profileForm);
       if (res.data.success) {
         setProfileSuccess(res.data.message);
         dispatch(restoreSession()); // refresh user in Redux
@@ -109,7 +109,7 @@ export default function ProfilePage() {
     }
     setPwLoading(true);
     try {
-      const res = await api.post('/profile/change_password.php', {
+      const res = await api.post('/profile/change-password', {
         current_password: pwForm.current_password,
         new_password:     pwForm.new_password,
       });

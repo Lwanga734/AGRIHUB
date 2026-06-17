@@ -5,7 +5,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '^/(auth|produce|prices|transactions|dashboard|users|notifications|profile)/.*': {
+      '^/(health|auth|produce|prices|transactions|dashboard|users|notifications|profile)(/.*)?$': {
         target: 'http://localhost:3001',
         changeOrigin: true,
       },
