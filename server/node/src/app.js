@@ -1,10 +1,7 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import { initDb } from './db.js';
-
-// Load .env for local dev — Vercel injects env vars directly
-dotenv.config({ path: new URL('../../.env', import.meta.url).pathname });
 import authRoutes from './routes/auth.js';
 import produceRoutes from './routes/produce.js';
 import pricesRoutes from './routes/prices.js';
@@ -17,6 +14,7 @@ import profileRoutes from './routes/profile.js';
 const allowedOrigins = [
   'http://localhost:5173',
   'https://agrihub-9dt3.vercel.app',
+  'https://agrihub-kohl.vercel.app',
 ];
 
 function isAllowedOrigin(origin) {
@@ -41,7 +39,7 @@ app.use(
 );
 app.use(express.json());
 
-// Seed admin user on startup (non-blocking — failures are logged, not fatal)
+// Seed admin user on startup (non-blocking)
 initDb().catch((err) => console.error('initDb warning:', err.message));
 
 app.get('/health', (_req, res) => {
